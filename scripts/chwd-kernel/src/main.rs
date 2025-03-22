@@ -21,6 +21,7 @@ mod kernel;
 use clap::Parser;
 use dialoguer::Confirm;
 use subprocess::{Exec, Redirection};
+use std::collections::HashSet;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -92,11 +93,19 @@ fn show_installed_kernels(kernels: &[kernel::Kernel]) {
         current_kernel
     );
     println!("The following kernels are installed in your system:");
+    let mut seen_kernels = HashSet::new();
     for kernel in kernels {
         if !kernel.is_installed().unwrap() {
             continue;
         }
-        println!("local/{} {}", kernel.name, kernel.version().unwrap());
+        let kernel_version = kernel.version().unwrap();
+        let key = (kernel.name.clone(), kernel_version.clone());
+
+        if seen_kernels.contains(&key) {
+            continue;
+        }
+        seen_kernels.insert(key);
+        println!("local/{} {}", kernel.name, kernel_version);
     }
 }
 
