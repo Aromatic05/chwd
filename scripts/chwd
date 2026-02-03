@@ -128,6 +128,27 @@ local function install(packages)
 end
 
 ---@param packages string
+---@param remove_set table<string, boolean>
+---@return string
+local function strip_packages(packages, remove_set)
+    local kept = {}
+    for _, pkg in ipairs(split(packages)) do
+        if not remove_set[pkg] then
+            kept[#kept + 1] = pkg
+        end
+    end
+    return table.concat(kept, " ")
+end
+
+---@param branch string
+---@return number?
+local function run_nv_helper(branch)
+    local cmd = table.concat({ "/var/lib/chwd/scripts/nv-helper", branch }, " ")
+    local _, _, code = os.execute(cmd)
+    return code
+end
+
+---@param packages string
 ---@return number?
 local function remove(packages)
     local pkgs = ""
@@ -356,13 +377,42 @@ local function main()
             packages = packages .. " " .. conditional_packages
         end
 
-        local code = install(packages)
+        local nv_branch
+        if profile_name == "nvidia-dkms-580xx" then
+            nv_branch = "580xx"
+        elseif profile_name == "nvidia-dkms-470xx" then
+            nv_branch = "470xx"
+        end
+
+        if nv_branch then
+            local remove_set = {
+                ["nvidia-" .. nv_branch .. "-dkms"] = true,
+                ["nvidia-" .. nv_branch .. "-utils"] = true,
+                ["nvidia-" .. nv_branch .. "-settings"] = true,
+                ["opencl-nvidia-" .. nv_branch] = true,
+                ["lib32-opencl-nvidia-" .. nv_branch] = true,
+                ["lib32-nvidia-" .. nv_branch .. "-utils"] = true
+            }
+            packages = strip_packages(packages, remove_set)
+        end
+        local code = 0
+        if packages:match("%S") then
+            code = install(packages)
+        end
         if code ~= 0 then
             exec_hook(hooks, "pre_remove")
             die("ERROR: Pacman command was failed! Exit code: %s", code)
-        else
-            exec_hook(hooks, "post_install")
         end
+
+        if nv_branch then
+            local nv_code = run_nv_helper(nv_branch)
+            if nv_code ~= 0 then
+                exec_hook(hooks, "pre_remove")
+                die("ERROR: nv-helper failed! Exit code: %s", nv_code)
+            end
+        end
+
+        exec_hook(hooks, "post_install")
     elseif options.remove then
         exec_hook(hooks, "pre_remove")
 
