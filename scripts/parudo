@@ -1,0 +1,123 @@
+#!/usr/bin/env lua
+
+local sudoers_file = "/etc/sudoers.d/chwd-paru-nobody"
+local cache_dir = "/var/cache/parudo"
+local user = "nobody"
+local group = "nobody"
+local pacman = "/usr/bin/pacman"
+
+local function die(msg)
+    io.stderr:write("ERROR: " .. msg .. "\n")
+    os.exit(1)
+end
+
+local function quote(s)
+    return "'" .. s:gsub("'", [["'"']]) .. "'"
+end
+
+local function run(cmd)
+    local ok, _, code = os.execute(cmd)
+    if ok ~= true then
+        os.exit(code or 1)
+    end
+end
+
+local function output(cmd)
+    local h = io.popen(cmd, "r")
+    if not h then
+        die("failed to run: " .. cmd)
+    end
+
+    local s = h:read("*a")
+    h:close()
+    return s
+end
+
+local function require_root()
+    local uid = output("id -u"):gsub("%s+$", "")
+    if uid ~= "0" then
+        die("must be run as root")
+    end
+end
+
+local function write_file(path, content)
+    local f, err = io.open(path, "w")
+    if not f then
+        die("failed to open " .. path .. ": " .. tostring(err))
+    end
+
+    f:write(content)
+    f:close()
+end
+
+local function sudoers_content()
+    return table.concat({
+        "# Managed by parudo.",
+        user .. " ALL=(root) NOPASSWD: " .. pacman,
+        "",
+    }, "\n")
+end
+
+local function install()
+    require_root()
+
+    run("mkdir -p " .. quote(cache_dir))
+    run("chown " .. quote(user .. ":" .. group) .. " " .. quote(cache_dir))
+    run("chmod 0700 " .. quote(cache_dir))
+
+    run("chage -E -1 " .. quote(user))
+
+    write_file(sudoers_file, sudoers_content())
+    run("chown root:root " .. quote(sudoers_file))
+    run("chmod 0440 " .. quote(sudoers_file))
+
+    print("installed")
+end
+
+local function remove()
+    require_root()
+
+    os.remove(sudoers_file)
+
+    run("chage -E 0 " .. quote(user))
+
+    print("removed")
+end
+
+local function status()
+    require_root()
+
+    print("== nobody ==")
+    run("chage -l " .. quote(user))
+
+    print("")
+    print("== sudoers ==")
+    local f = io.open(sudoers_file, "r")
+    if f then
+        print(f:read("*a"))
+        f:close()
+    else
+        print("not installed")
+    end
+
+    print("== cache ==")
+    run("ls -ld " .. quote(cache_dir))
+end
+
+local action = arg[1]
+
+if action == "install" then
+    install()
+elseif action == "remove" then
+    remove()
+elseif action == "status" then
+    status()
+else
+    print([[
+Usage:
+  parudo install
+  parudo remove
+  parudo status
+]])
+    os.exit(1)
+end

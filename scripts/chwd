@@ -16,7 +16,7 @@ You should have received a copy of the GNU General Public License along
 with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 --]]
-local pacman, pmconfig, pmroot, cachedir, sync
+local pacman, paru, parudo, pmconfig, pmroot, cachedir, sync
 
 ---@alias hookAlias {pre_install: string?, post_install: string?, post_remove: string?, pre_remove: string?, conditional_packages: string?}
 
@@ -118,13 +118,42 @@ local function pacman_handle(action, pkgs)
     return code
 end
 
+---@param action string
+---@param pkgs string
+---@return number?
+local function paru_handle(action, pkgs)
+    local cmd = table.concat({
+        "sudo -u nobody env",
+        "HOME=/var/cache/parudo",
+        "XDG_CACHE_HOME=/var/cache/parudo/.cache",
+        paru,
+        action,
+        pkgs
+    }, " ")
+
+    local _, _, code = os.execute(cmd)
+    return code
+end
+
+---@return number?
+local function parudo_install()
+    local _, _, code = os.execute(parudo .. " install")
+    return code
+end
+
+---@return number?
+local function parudo_remove()
+    local _, _, code = os.execute(parudo .. " remove")
+    return code
+end
+
 ---@param packages string
 ---@return number?
 local function install(packages)
     if sync then
-        return pacman_handle("--needed -Sy", packages)
+        return paru_handle("--needed -Sy", packages)
     end
-    return pacman_handle("--needed -S", packages)
+    return paru_handle("--needed -S", packages)
 end
 
 ---@param packages string
@@ -132,7 +161,7 @@ end
 local function remove(packages)
     local pkgs = ""
     for _, pkg in ipairs(split(packages)) do
-        if is_installed(pkg) and (pkg ~= "mesa" or pkg ~= "lib32-mesa") then
+        if is_installed(pkg) and (pkg ~= "mesa" and pkg ~= "lib32-mesa") then
             pkgs = pkgs .. " " .. pkg
         end
     end
@@ -249,7 +278,6 @@ local function parse_profiles(path)
     return profiles
 end
 
-
 ---@param profiles table<string, {packages: string?, hooks: hookAlias}>
 ---@param name string
 ---@return string?, hookAlias
@@ -312,6 +340,9 @@ local function main()
     pmroot = get_opt_argument(options, "pmroot", "/")
     pmconfig = get_opt_argument(options, "pmconfig", "/etc/pacman.conf")
     pacman = table.concat({ "pacman --noconfirm", "--cachedir", cachedir, "-r", pmroot, "--config", pmconfig }, " ")
+    paru = "paru --noconfirm --skipreview"
+    parudo = "/var/lib/chwd/scripts/parudo"
+
     local profile_name = get_opt_argument(options, "profile")
     local path = get_opt_argument(options, "path")
 
@@ -348,6 +379,11 @@ local function main()
     end
 
     if options.install then
+        local parudo_code = parudo_install()
+        if parudo_code ~= 0 then
+            die("ERROR: parudo install failed! Exit code: %s", parudo_code)
+        end
+
         exec_hook(hooks, "pre_install")
 
         local conditional_packages = exec_hook(hooks, "conditional_packages")
@@ -363,9 +399,15 @@ local function main()
         end
 
         local code = install(packages)
+
+        local cleanup_code = parudo_remove()
+        if cleanup_code ~= 0 then
+            printf("WARNING: parudo remove failed! Exit code: %s", cleanup_code)
+        end
+
         if code ~= 0 then
             exec_hook(hooks, "pre_remove")
-            die("ERROR: Pacman command was failed! Exit code: %s", code)
+            die("ERROR: Paru command was failed! Exit code: %s", code)
         else
             exec_hook(hooks, "post_install")
         end
