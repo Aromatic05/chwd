@@ -2,7 +2,7 @@
 desc = 'Fallback handheld profile'
 class_ids = "0601"
 priority = 3
-packages = 'steamos-manager inputplumber steamos-powerbuttond cachyos-handheld'
+packages = 'steamos-manager inputplumber'
 
 [handheld.exact]
 desc = "Exact"
